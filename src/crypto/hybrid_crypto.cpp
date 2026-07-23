@@ -16,7 +16,19 @@
 namespace upi::crypto
 {
 
-    // Encode binary vector to Base64
+    // Helper: Extract OpenSSL error stack messages
+    static std::string get_openssl_error()
+    {
+        BIO *bio = BIO_new(BIO_s_mem());
+        ERR_print_errors(bio);
+        char *buf = nullptr;
+        long len = BIO_get_mem_data(bio, &buf);
+        std::string err_msg(buf, len);
+        BIO_free(bio);
+        return err_msg.empty() ? "Unknown OpenSSL Error" : err_msg;
+    }
+
+    // Helper: Encode binary vector to Base64
     static std::string base64_encode(const std::vector<unsigned char> &data)
     {
         BIO *bio = BIO_new(BIO_f_base64());
@@ -34,7 +46,7 @@ namespace upi::crypto
         return result;
     }
 
-    // Decode Base64 to binary vector
+    // Helper: Decode Base64 to binary vector
     static std::vector<unsigned char> base64_decode(const std::string &base64_str)
     {
         BIO *bio = BIO_new(BIO_f_base64());
@@ -43,12 +55,18 @@ namespace upi::crypto
         bio = BIO_push(bio, mem);
 
         std::vector<unsigned char> buffer(base64_str.size());
-        int decoded_size = BIO_read(bio, buffer.data(), static_cast<int>(buffer.size()));
+        int decoded_total = 0;
+        int len = 0;
+
+        while ((len = BIO_read(bio, buffer.data() + decoded_total, static_cast<int>(buffer.size() - decoded_total))) > 0)
+        {
+            decoded_total += len;
+        }
         BIO_free_all(bio);
 
-        if (decoded_size < 0)
-            throw std::runtime_error("Base64 decode failed");
-        buffer.resize(decoded_size);
+        if (decoded_total <= 0)
+            throw std::runtime_error("Base64 decode failed or empty output");
+        buffer.resize(decoded_total);
         return buffer;
     }
 
@@ -69,16 +87,16 @@ namespace upi::crypto
     {
         EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
         if (!ctx)
-            throw std::runtime_error("Failed to create EVP_PKEY_CTX");
+            throw std::runtime_error("Failed to create EVP_PKEY_CTX: " + get_openssl_error());
 
         if (EVP_PKEY_keygen_init(ctx) <= 0)
-            throw std::runtime_error("Failed to init keygen");
+            throw std::runtime_error("Failed to init keygen: " + get_openssl_error());
         if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048) <= 0)
-            throw std::runtime_error("Failed to set key length");
+            throw std::runtime_error("Failed to set key length: " + get_openssl_error());
 
         EVP_PKEY *pkey = nullptr;
         if (EVP_PKEY_keygen(ctx, &pkey) <= 0)
-            throw std::runtime_error("Failed to generate RSA key");
+            throw std::runtime_error("Failed to generate RSA key: " + get_openssl_error());
 
         BIO *pub_bio = BIO_new(BIO_s_mem());
         PEM_write_bio_PUBKEY(pub_bio, pkey);
@@ -118,7 +136,7 @@ namespace upi::crypto
         if (EVP_EncryptInit_ex(cipher_ctx, EVP_aes_256_gcm(), nullptr, aes_key.data(), iv.data()) != 1)
         {
             EVP_CIPHER_CTX_free(cipher_ctx);
-            throw std::runtime_error("EVP_EncryptInit_ex failed");
+            throw std::runtime_error("EVP_EncryptInit_ex failed: " + get_openssl_error());
         }
 
         std::vector<unsigned char> ciphertext(json_payload.size() + EVP_CIPHER_block_size(EVP_aes_256_gcm()));
@@ -128,14 +146,14 @@ namespace upi::crypto
                               static_cast<int>(json_payload.size())) != 1)
         {
             EVP_CIPHER_CTX_free(cipher_ctx);
-            throw std::runtime_error("EVP_EncryptUpdate failed");
+            throw std::runtime_error("EVP_EncryptUpdate failed: " + get_openssl_error());
         }
         int cipher_len = out_len;
 
         if (EVP_EncryptFinal_ex(cipher_ctx, ciphertext.data() + out_len, &out_len) != 1)
         {
             EVP_CIPHER_CTX_free(cipher_ctx);
-            throw std::runtime_error("EVP_EncryptFinal_ex failed");
+            throw std::runtime_error("EVP_EncryptFinal_ex failed: " + get_openssl_error());
         }
         cipher_len += out_len;
         ciphertext.resize(cipher_len);
@@ -145,29 +163,32 @@ namespace upi::crypto
         if (EVP_CIPHER_CTX_ctrl(cipher_ctx, EVP_CTRL_GCM_GET_TAG, 16, gcm_tag.data()) != 1)
         {
             EVP_CIPHER_CTX_free(cipher_ctx);
-            throw std::runtime_error("Failed to get GCM Tag");
+            throw std::runtime_error("Failed to get GCM Tag: " + get_openssl_error());
         }
         EVP_CIPHER_CTX_free(cipher_ctx);
 
-        // 3. Encrypt AES key with Server's RSA Public Key (RSA-OAEP)
+        // 3. Encrypt AES key with RSA Public Key
         BIO *pub_bio = BIO_new_mem_buf(public_key_pem.data(), static_cast<int>(public_key_pem.size()));
         EVP_PKEY *rsa_key = PEM_read_bio_PUBKEY(pub_bio, nullptr, nullptr, nullptr);
         BIO_free(pub_bio);
         if (!rsa_key)
-            throw std::runtime_error("Failed to parse RSA public key");
+            throw std::runtime_error("Failed to parse RSA public key: " + get_openssl_error());
 
         EVP_PKEY_CTX *rsa_ctx = EVP_PKEY_CTX_new(rsa_key, nullptr);
         EVP_PKEY_encrypt_init(rsa_ctx);
         EVP_PKEY_CTX_set_rsa_padding(rsa_ctx, RSA_PKCS1_OAEP_PADDING);
+        EVP_PKEY_CTX_set_rsa_oaep_md(rsa_ctx, EVP_sha256());
+        EVP_PKEY_CTX_set_rsa_mgf1_md(rsa_ctx, EVP_sha256());
 
         size_t encrypted_key_len = 0;
         EVP_PKEY_encrypt(rsa_ctx, nullptr, &encrypted_key_len, aes_key.data(), aes_key.size());
         std::vector<unsigned char> encrypted_aes_key(encrypted_key_len);
+
         if (EVP_PKEY_encrypt(rsa_ctx, encrypted_aes_key.data(), &encrypted_key_len, aes_key.data(), aes_key.size()) <= 0)
         {
             EVP_PKEY_CTX_free(rsa_ctx);
             EVP_PKEY_free(rsa_key);
-            throw std::runtime_error("RSA key encryption failed");
+            throw std::runtime_error("RSA key encryption failed: " + get_openssl_error());
         }
         EVP_PKEY_CTX_free(rsa_ctx);
         EVP_PKEY_free(rsa_key);
@@ -189,10 +210,12 @@ namespace upi::crypto
     {
         std::vector<unsigned char> wire_buffer = base64_decode(ciphertext_base64);
 
+        // Min len check
         if (wire_buffer.size() < 284)
         {
             throw std::runtime_error("Invalid packet length: Payload too short");
         }
+
         auto encrypted_key_begin = wire_buffer.begin();
         auto iv_begin = encrypted_key_begin + 256;
         auto tag_begin = iv_begin + 12;
@@ -203,25 +226,38 @@ namespace upi::crypto
         std::vector<unsigned char> gcm_tag(tag_begin, ciphertext_begin);
         std::vector<unsigned char> ciphertext(ciphertext_begin, wire_buffer.end());
 
-        // 1. Decrypt AES Key using Server's RSA Private Key
+        // 1. Decrypt AES Key using RSA Private Key
         BIO *priv_bio = BIO_new_mem_buf(private_key_pem.data(), static_cast<int>(private_key_pem.size()));
         EVP_PKEY *rsa_key = PEM_read_bio_PrivateKey(priv_bio, nullptr, nullptr, nullptr);
         BIO_free(priv_bio);
         if (!rsa_key)
-            throw std::runtime_error("Failed to parse RSA private key");
+            throw std::runtime_error("Failed to parse RSA private key: " + get_openssl_error());
 
         EVP_PKEY_CTX *rsa_ctx = EVP_PKEY_CTX_new(rsa_key, nullptr);
         EVP_PKEY_decrypt_init(rsa_ctx);
         EVP_PKEY_CTX_set_rsa_padding(rsa_ctx, RSA_PKCS1_OAEP_PADDING);
+        EVP_PKEY_CTX_set_rsa_oaep_md(rsa_ctx, EVP_sha256());
+        EVP_PKEY_CTX_set_rsa_mgf1_md(rsa_ctx, EVP_sha256());
 
-        size_t aes_key_len = 32;
+        // Step A: Determine maximum output buffer required by OpenSSL
+        size_t aes_key_len = 0;
+        if (EVP_PKEY_decrypt(rsa_ctx, nullptr, &aes_key_len, encrypted_aes_key.data(), encrypted_aes_key.size()) <= 0)
+        {
+            EVP_PKEY_CTX_free(rsa_ctx);
+            EVP_PKEY_free(rsa_key);
+            throw std::runtime_error("Failed to query RSA decrypt buffer size: " + get_openssl_error());
+        }
+
+        // Step B: Allocate buffer and perform decryption
         std::vector<unsigned char> aes_key(aes_key_len);
         if (EVP_PKEY_decrypt(rsa_ctx, aes_key.data(), &aes_key_len, encrypted_aes_key.data(), encrypted_aes_key.size()) <= 0)
         {
             EVP_PKEY_CTX_free(rsa_ctx);
             EVP_PKEY_free(rsa_key);
-            throw std::runtime_error("RSA key decryption failed");
+            throw std::runtime_error("RSA key decryption failed: " + get_openssl_error());
         }
+        aes_key.resize(aes_key_len);
+
         EVP_PKEY_CTX_free(rsa_ctx);
         EVP_PKEY_free(rsa_key);
 
@@ -230,7 +266,7 @@ namespace upi::crypto
         if (EVP_DecryptInit_ex(cipher_ctx, EVP_aes_256_gcm(), nullptr, aes_key.data(), iv.data()) != 1)
         {
             EVP_CIPHER_CTX_free(cipher_ctx);
-            throw std::runtime_error("EVP_DecryptInit_ex failed");
+            throw std::runtime_error("EVP_DecryptInit_ex failed: " + get_openssl_error());
         }
 
         std::vector<unsigned char> plaintext(ciphertext.size());
@@ -238,14 +274,15 @@ namespace upi::crypto
         if (EVP_DecryptUpdate(cipher_ctx, plaintext.data(), &out_len, ciphertext.data(), static_cast<int>(ciphertext.size())) != 1)
         {
             EVP_CIPHER_CTX_free(cipher_ctx);
-            throw std::runtime_error("EVP_DecryptUpdate failed");
+            throw std::runtime_error("EVP_DecryptUpdate failed: " + get_openssl_error());
         }
         int plain_len = out_len;
 
+        // Set expected GCM Authentication
         if (EVP_CIPHER_CTX_ctrl(cipher_ctx, EVP_CTRL_GCM_SET_TAG, 16, gcm_tag.data()) != 1)
         {
             EVP_CIPHER_CTX_free(cipher_ctx);
-            throw std::runtime_error("Failed to set GCM Tag for verification");
+            throw std::runtime_error("Failed to set GCM Tag: " + get_openssl_error());
         }
 
         // Finalize decryption
