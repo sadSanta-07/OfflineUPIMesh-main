@@ -3,7 +3,7 @@
 
 #include <string>
 #include <unordered_map>
-#include <shared_mutex>
+#include <mutex>
 #include <chrono>
 
 namespace upi::service
@@ -13,7 +13,7 @@ namespace upi::service
     {
     private:
         std::unordered_map<std::string, std::chrono::system_clock::time_point> seen_hashes_;
-        mutable std::shared_mutex mutex_;
+        mutable std::mutex mutex_; 
 
     public:
         IdempotencyService() = default;
