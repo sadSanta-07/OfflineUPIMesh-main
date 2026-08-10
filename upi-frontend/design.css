@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400&family=Inter+Tight:wght@400;500;600&family=Geist+Mono&display=swap');
+
+:root {
+  --bg: #0e0d0b;
+  --surface: #15130f;
+  --surface-sec: #1b1815;
+  --border: #2a2620;
+  --primary: #c7472a;
+  --primary-dark: #a8442d;
+  --text-pri: #f2eadd;
+  --text-on-pri: #fff8ee;
+  --text-muted: #8b847a;
+  
+  --inset-border: rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset;
+  --card-inset: rgba(255, 248, 238, 0.18) 0px 0px 0px 0.5px inset;
+  --card-glow: rgba(199, 71, 42, 0.45) 0px 18px 48px -16px;
+  --card-hover-glow: rgba(199, 71, 42, 0.22) 0px 6px 24px -10px;
+  
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 100ms;
+  --dur-base: 120ms;
+  --dur-med: 200ms;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background-color: var(--bg);
+  color: var(--text-pri);
+  font-family: 'Inter Tight', sans-serif;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px;
+}
+
+h1 { font-size: 72px; font-weight: 600; line-height: 1.2; margin-bottom: 48px; }
+h1 span.emphatic { font-family: 'Fraunces', serif; font-weight: 400; font-style: italic; color: var(--primary); }
+h2 { font-size: 26px; font-weight: 600; margin-bottom: 16px; }
+.code { font-family: 'Geist Mono', monospace; font-size: 13px; color: var(--text-muted); }
+
+.fcard {
+  background-color: var(--surface);
+  border-radius: 6px;
+  padding: 24px;
+  width: 300px;
+  box-shadow: var(--card-inset), var(--card-glow);
+  transition: transform var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
+}
+.fcard:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--card-inset), var(--card-hover-glow);
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  color: var(--text-on-pri);
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--dur-med) var(--ease);
+  width: 100%;
+  margin-top: 24px;
+}
+.btn-primary:hover { background-color: var(--primary-dark); }
+.btn-primary:active { transform: translateY(1px); }
+
+.mesh-grid {
+  display: flex;
+  gap: 32px;
+  margin-top: 24px;
+}
+
+.terminal-log {
+  margin-top: 48px;
+  background: var(--surface-sec);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  width: 100%;
+  max-width: 632px;
+  height: 200px;
+  overflow-y: auto;
+}

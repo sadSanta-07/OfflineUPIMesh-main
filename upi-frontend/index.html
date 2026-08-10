@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UPI Offline Mesh</title>
+    <link rel="stylesheet" href="design.css">
+</head>
+
+<body>
+
+    <h1>UPI Offline <span class="emphatic">Mesh</span></h1>
+
+    <div class="mesh-grid">
+        <!-- Alice's Phone -->
+        <div class="fcard" id="alice-card">
+            <h2>Alice</h2>
+            <p class="code">vpa: alice@upi</p>
+            <h1 style="font-size: 48px; margin-top: 16px; margin-bottom: 0;">₹<span id="alice-bal">---</span></h1>
+
+            <button class="btn-primary" onclick="injectPacket()">1. Encrypt & Inject ₹500</button>
+        </div>
+
+        <!-- Bob's Phone -->
+        <div class="fcard" id="bob-card">
+            <h2>Bob</h2>
+            <p class="code">vpa: bob@upi</p>
+            <h1 style="font-size: 48px; margin-top: 16px; margin-bottom: 0;">₹<span id="bob-bal">---</span></h1>
+
+            <button class="btn-primary" onclick="bridgeUpload()"
+                style="background-color: transparent; border: 1px solid var(--border); color: var(--text-pri);">2.
+                Bridge Node Upload</button>
+            <button class="btn-primary" onclick="duplicateStorm()"
+                style="background-color: transparent; border: 1px dashed var(--primary); color: var(--primary); margin-top: 12px;">3.
+                Trigger Duplicate Storm</button>
+        </div>
+    </div>
+
+    <div class="terminal-log code" id="terminal">
+        > System initialized. Awaiting API connection to C++ Backend...<br>
+    </div>
+
+    <script>
+        const API_BASE = "http://localhost:8080/api";
+        let pendingPacket = null;
+
+        function log(message) {
+            const term = document.getElementById('terminal');
+            term.innerHTML += `> ${message}<br>`;
+            term.scrollTop = term.scrollHeight;
+        }
+
+        async function fetchBalances() {
+            try {
+                const res = await fetch(`${API_BASE}/accounts`);
+                const data = await res.json();
+
+                data.forEach(account => {
+                    if (account.vpa === 'alice@upi') document.getElementById('alice-bal').innerText = account.balance;
+                    if (account.vpa === 'bob@upi') document.getElementById('bob-bal').innerText = account.balance;
+                });
+                log("Balances synced with SQLite database.");
+            } catch (e) {
+                log(`<span style="color:var(--primary);">Error connecting to C++ backend. Is it running?</span>`);
+            }
+        }
+
+        async function injectPacket() {
+            log("Simulating offline phone encrypting payload with RSA-OAEP...");
+            const res = await fetch(`${API_BASE}/demo/generate`);
+            pendingPacket = await res.json();
+
+            log(`Packet created! Hash: ${pendingPacket.packetId}`);
+            log(`Ciphertext (Base64): ${pendingPacket.ciphertext.substring(0, 30)}...`);
+
+            document.getElementById('alice-card').style.boxShadow = "var(--card-inset), 0px 0px 60px 10px rgba(83, 58, 253, 0.4)"; // Blue flash
+            setTimeout(() => document.getElementById('alice-card').style.boxShadow = "var(--card-inset), var(--card-glow)", 500);
+        }
+
+        //Bridge node uploads to server
+        async function bridgeUpload() {
+            if (!pendingPacket) {
+                log("No packet in the mesh! Inject one first.");
+                return;
+            }
+
+            log("Bridge node found 4G. Uploading to /api/bridge/ingest...");
+
+            const res = await fetch(`${API_BASE}/bridge/ingest`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(pendingPacket)
+            });
+
+            const result = await res.json();
+
+            if (res.status === 200) {
+                log(`<span style="color:#2ecc71;">SETTLED! Packet Hash: ${result.packetHash.substring(0, 20)}...</span>`);
+                fetchBalances();
+            } else if (res.status === 409) {
+                log(`<span style="color:var(--primary);">DUPLICATE DROPPED! Packet already processed.</span>`);
+            } else {
+                log(`<span style="color:var(--primary);">REJECTED: ${result.reason}</span>`);
+            }
+        }
+
+        fetchBalances();
+
+        //Fire 10 concurrent requests
+        async function duplicateStorm() {
+            if (!pendingPacket) {
+                log("No packet to storm! Inject one first.");
+                return;
+            }
+
+            log(`<span style="color:#f39c12;">[STORM] Firing 10 simultaneous bridge uploads...</span>`);
+
+            const requests = [];
+            for (let i = 0; i < 10; i++) {
+                requests.push(fetch(`${API_BASE}/bridge/ingest`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(pendingPacket)
+                }));
+            }
+
+            const responses = await Promise.all(requests);
+
+            let settled = 0, dropped = 0, rejected = 0;
+
+            for (const res of responses) {
+                if (res.status === 200) settled++;
+                else if (res.status === 409) dropped++;
+                else rejected++;
+            }
+
+            log(`<span style="color:#2ecc71;">Storm Results: ${settled} Settled, </span><span style="color:var(--primary);">${dropped} Dropped, ${rejected} Rejected</span>`);
+            fetchBalances();
+        }
+    </script>
+</body>
+
+</html>
