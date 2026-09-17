@@ -1,1 +1,52 @@
-build*
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# CMake & Build Folders
+build/
+_deps/
+CMakeFiles/
+CMakeCache.txt
+CMakeScripts/
+cmake_install.cmake
+Makefile
+build.ninja
+CPackConfig.cmake
+CPackSourceConfig.cmake
+
+# Databases
+*.db
+*.db-journal
+*.sqlite3
+
+# VS Code specific
+.vscode/

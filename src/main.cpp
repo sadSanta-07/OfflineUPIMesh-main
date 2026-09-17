@@ -2,15 +2,19 @@
 #include "upi_mesh/crypto/hybrid_crypto.hpp"
 #include "upi_mesh/db/database.hpp"
 #include <crow.h>
+#include <crow/middlewares/cors.h>
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <chrono>
 
 int main()
 {
-    crow::SimpleApp app;
-    upi::service::IdempotencyService idempotency_cache;
+    crow::App<crow::CORSHandler> app;
+    auto& cors = app.get_middleware<crow::CORSHandler>();
+    cors.global().headers("*").methods("POST"_method, "GET"_method, "OPTIONS"_method).origin("*");
 
+    upi::service::IdempotencyService idempotency_cache;
+    
     CROW_LOG_INFO << "Initializing SQLite Database...";
     upi::db::Database db("upi_ledger.db");
     db.init_schema();
